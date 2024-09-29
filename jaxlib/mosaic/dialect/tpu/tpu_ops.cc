@@ -14,6 +14,9 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
+#include <optional>
+#include <string_view>
+#include <vector>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -506,6 +509,251 @@ class CanonicalizeAddOfMatmul : public OpRewritePattern<AddOp> {
     return try_canonicalize(op.getLhs(), op.getRhs());
   }
 };
+
+LogicalResult MatmulOp::verify() {
+  // Note - this is not yet an exhaustive verification of matmul. Many of the
+  // invariants are spread across infer, apply, llo and below. This is,
+  // however, a good start and the recommended place to add more invariants.
+  const VectorType lhs_ty = getLhs().getType();
+  const VectorType rhs_ty = getRhs().getType();
+
+  if (getDimensionNumbers().has_value()) {
+    auto dimension_numbers = getDimensionNumbers().value();
+    auto lhs_contracting_dims = dimension_numbers.getLhsContractingDims();
+    auto rhs_contracting_dims = dimension_numbers.getRhsContractingDims();
+    if (lhs_contracting_dims.size() != 1) {
+      emitOpError("Not implemented: lhs contracting dims must be of size 1");
+      return failure();
+    }
+    if (rhs_contracting_dims.size() != 1) {
+      emitOpError("Not implemented: rhs contracting dims must be of size 1");
+      return failure();
+    }
+
+    auto lhs_contracting_dim = lhs_contracting_dims[0];
+    auto rhs_contracting_dim = rhs_contracting_dims[0];
+
+    auto lhs_batch_dims = dimension_numbers.getLhsBatchDims();
+    auto rhs_batch_dims = dimension_numbers.getRhsBatchDims();
+
+    auto lhs_non_contracting_dims =
+        dimension_numbers.getLhsNonContractingDims();
+    auto rhs_non_contracting_dims =
+        dimension_numbers.getRhsNonContractingDims();
+
+    if (lhs_contracting_dims.size() + lhs_non_contracting_dims.size() +
+            lhs_batch_dims.size() !=
+        lhs_ty.getShape().size()) {
+      emitOpError(
+          "Not implemented: lhs contracting + non contracting + batch dims "
+          "must be of the same size as the lhs shape");
+      return failure();
+    }
+    if (rhs_contracting_dims.size() + rhs_non_contracting_dims.size() +
+            rhs_batch_dims.size() !=
+        rhs_ty.getShape().size()) {
+      emitOpError(
+          "Not implemented: rhs contracting + non contracting + batch dims "
+          "must be of the same size as the rhs shape");
+      return failure();
+    }
+
+    if (lhs_ty.getShape()[lhs_contracting_dim] !=
+        rhs_ty.getShape()[rhs_contracting_dim]) {
+      emitOpError(
+          "Not implemented: lhs and rhs contracting dims must be of the same "
+          "size");
+      return failure();
+    }
+
+    if (lhs_batch_dims.size() != rhs_batch_dims.size()) {
+      emitOpError("Not implemented: Up to 1 batch dim supported");
+      return failure();
+    }
+    if (lhs_batch_dims.size() > 1) {
+      emitOpError("Not implemented: Up to 1 batch dim supported");
+      return failure();
+    }
+
+    int64_t lhs_rank = lhs_ty.getShape().size();
+    int64_t rhs_rank = rhs_ty.getShape().size();
+
+    std::vector<bool> seen_dims_lhs(lhs_rank, false);
+    std::vector<bool> seen_dims_rhs(rhs_rank, false);
+
+    auto check_and_mark_dims = [&](const std::vector<int64_t> &dims,
+                                   std::vector<bool> &seen_dims,
+                                   const std::string_view operand) {
+      for (int64_t dim : dims) {
+        if (seen_dims[dim]) {
+          emitOpError("Illegal: Dim ")
+              << dim << " repeats in dimension numbers of " << operand;
+          return failure();
+        }
+        seen_dims[dim] = true;
+      }
+      return success();
+    };
+
+    if (failed(
+            check_and_mark_dims(lhs_contracting_dims, seen_dims_lhs, "lhs")) ||
+        failed(check_and_mark_dims(lhs_non_contracting_dims, seen_dims_lhs,
+                                   "lhs")) ||
+        failed(check_and_mark_dims(lhs_batch_dims, seen_dims_lhs, "lhs"))) {
+      return failure();
+    }
+
+    if (failed(
+            check_and_mark_dims(rhs_contracting_dims, seen_dims_rhs, "rhs")) ||
+        failed(check_and_mark_dims(rhs_non_contracting_dims, seen_dims_rhs,
+                                   "rhs")) ||
+        failed(check_and_mark_dims(rhs_batch_dims, seen_dims_rhs, "rhs"))) {
+      return failure();
+    }
+
+    for (int64_t dim = 0; dim < lhs_rank; ++dim) {
+      if (!seen_dims_lhs[dim]) {
+        emitOpError("Illegal: Dim ")
+            << dim << " is not seen in lhs dimension numbers";
+        return failure();
+      }
+    }
+    for (int64_t dim = 0; dim < rhs_rank; ++dim) {
+      if (!seen_dims_rhs[dim]) {
+        emitOpError("Illegal: Dim ")
+            << dim << " is not seen in rhs dimension numbers";
+      }
+    }
+
+    // At this point, we always have dimension numbers, and they are valid.
+    const std::optional<int64_t> batch_dim_lhs =
+        lhs_batch_dims.empty() ? std::nullopt
+                               : std::optional<int64_t>(lhs_batch_dims[0]);
+    const std::optional<int64_t> batch_dim_rhs =
+        rhs_batch_dims.empty() ? std::nullopt
+                               : std::optional<int64_t>(rhs_batch_dims[0]);
+    if (batch_dim_lhs != batch_dim_rhs) {
+      emitOpError("Not Implemented: batch dims must be equal");
+      return failure();
+    }
+    if (batch_dim_lhs.has_value() && (batch_dim_lhs.value() != 0)) {
+      emitOpError("Not Implemented: batch dims pos must be 0");
+      return failure();
+    }
+    // Invariant above enforces only 1 batch dim atm, and that both are eq
+    std::optional<int64_t> batch_size = std::nullopt;
+    if (batch_dim_lhs.has_value()) {
+      batch_size = lhs_ty.getShape()[batch_dim_lhs.value()];
+      auto rhs_batch_size = rhs_ty.getShape()[batch_dim_rhs.value()];
+      if (batch_size != rhs_batch_size) {
+        emitOpError("Not Implemented: batch dims must be equal");
+        return failure();
+      }
+      if (batch_size == 0) {
+        emitOpError("Illegal: batch size must be > 0");
+        return failure();
+      }
+    }
+    auto output_dim_order = dimension_numbers.getOutputDimOrder();
+    if (output_dim_order.size() % 2 != 0) {
+      emitOpError(
+          "Illegal: output dim order must have an even number of elements.");
+      return failure();
+    }
+    if (batch_size.has_value()) {
+      if (output_dim_order[0] != 0 || output_dim_order[1] != 0) {
+        emitOpError(
+            "Not implemented: Output with batch size must be the lhs 0 idx for "
+            "now.");
+        return failure();
+      }
+    }
+
+    // Invariants above enforce a single batch idx for now, and that it is in
+    // position 0. Future extensions to this will be to:
+    // 1. Support multiple batch dims
+    // 2. Support batch dims in any position in the output dim order
+    if (lhs_non_contracting_dims.size() > 1) {
+      emitOpError(
+          "Not implemented: lhs non contracting dims must be of size 1");
+      return failure();
+    }
+    if (rhs_non_contracting_dims.size() > 1) {
+      emitOpError(
+          "Not implemented: rhs non contracting dims must be of size 1");
+      return failure();
+    }
+    if (lhs_contracting_dims.size() > 1) {
+      emitOpError("Not implemented: lhs contracting dims must be of size 1");
+      return failure();
+    }
+    if (rhs_contracting_dims.size() > 1) {
+      emitOpError("Not implemented: rhs contracting dims must be of size 1");
+      return failure();
+    }
+
+    auto lhs_non_contracting_dim = lhs_non_contracting_dims[0];
+    auto rhs_non_contracting_dim = rhs_non_contracting_dims[0];
+
+    auto lhs_seen = false;
+    auto rhs_seen = false;
+
+    // A bit long winded, but the invariants we enforce below are:
+    // 1. We saw the rhs and lhs non contracting dims in the output dim order
+    // 2. We never see the contracting dims in the output dim order
+    // 3. We only see each of the non contracting dim once
+    for (int dim_pos = batch_size.has_value() ? 2 : 0;
+         dim_pos < output_dim_order.size(); dim_pos += 2) {
+      auto idx = output_dim_order[dim_pos];
+      if (idx != 0 && idx != 1) {
+        emitOpError("Illegal: output dim order must be 0 or 1");
+        return failure();
+      }
+      auto is_lhs = (idx == 0);
+      auto dim = output_dim_order[dim_pos + 1];
+      if (is_lhs) {
+        if (dim == lhs_non_contracting_dim) {
+          if (!lhs_seen) {
+            lhs_seen = true;
+          } else {
+            emitOpError("Illegal: lhs non contracting dim ")
+                << dim << " appears more than once in  output dim order";
+            return failure();
+          }
+        } else if (dim == lhs_contracting_dim) {
+          emitOpError("Illegal: contracting dim ")
+              << dim << " appears in lhs output dim order";
+          return failure();
+        }
+      } else {
+        if (dim == rhs_non_contracting_dim) {
+          if (!rhs_seen) {
+            rhs_seen = true;
+          } else {
+            emitOpError("Illegal: rhs non contracting dim ")
+                << dim << " appears more than once in rhs output dim order";
+            return failure();
+          }
+        } else if (dim == rhs_contracting_dim) {
+          emitOpError("Illegal: contracting dim ")
+              << dim << " appears in rhs output dim order";
+          return failure();
+        }
+      }
+    }
+    if (!lhs_seen) {
+      emitOpError("Illegal: lhs non contracting dim ")
+          << lhs_non_contracting_dim << " is not seen in lhs output dim order";
+      return failure();
+    }
+    if (!rhs_seen) {
+      emitOpError("Illegal: rhs non contracting dim ")
+          << rhs_non_contracting_dim << " is not seen in rhs output dim order";
+      return failure();
+    }
+  }
+  return success();
+}
 
 void MatmulOp::getCanonicalizationPatterns(RewritePatternSet &patterns,
                                            MLIRContext *context) {
