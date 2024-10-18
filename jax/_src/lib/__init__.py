@@ -120,7 +120,8 @@ xla_extension_version: int = getattr(xla_client, '_version', 0)
 import jaxlib.gpu_rnn as gpu_rnn  # pytype: disable=import-error  # noqa: F401
 import jaxlib.gpu_triton as gpu_triton # pytype: disable=import-error  # noqa: F401
 
-import jaxlib.mosaic.python.tpu as tpu # pytype: disable=import-error  # noqa: F401
+import jaxlib.mosaic.python.mosaic_gpu as mosaic_gpu_dialect  # pytype: disable=import-error
+import jaxlib.mosaic.python.tpu as tpu  # pytype: disable=import-error  # noqa: F401
 
 # Version number for MLIR:Python APIs, provided by jaxlib.
 mlir_api_version = xla_client.mlir_api_version

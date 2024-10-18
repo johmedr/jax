@@ -19,6 +19,14 @@ package(
     default_visibility = ["//jax:mosaic_gpu_users"],
 )
 
+exports_files(
+    glob(
+        include = ["**/*"],
+        exclude = [],
+    ),
+    visibility = ["//jax:mosaic_gpu_users"],
+)
+
 td_library(
     name = "mosaic_gpu_td_files",
     srcs = ["mosaic_gpu.td"],

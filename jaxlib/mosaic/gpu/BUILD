@@ -26,6 +26,25 @@ py_library(
     deps = [":_mosaic_gpu_ext"],
 )
 
+DIALECT_CAPI_SOURCES = [
+    "//jaxlib/mosaic/dialect/gpu:integrations/c/mosaic_gpu_dialect.cc",
+]
+
+DIALECT_CAPI_HEADERS = [
+    "//jaxlib/mosaic/dialect/gpu:integrations/c/mosaic_gpu_dialect.h",
+]
+
+cc_library(
+    name = "mosaic_gpu_dialect_capi",
+    srcs = DIALECT_CAPI_SOURCES,
+    hdrs = DIALECT_CAPI_HEADERS,
+    deps = [
+        "//jaxlib/mosaic/dialect/gpu:mosaic_gpu",
+        "//jaxlib/mosaic/dialect/gpu:mosaic_gpu_inc_gen",
+        "@llvm-project//mlir:CAPIIR",
+    ],
+)
+
 cc_library(
     name = "target",
     srcs = ["target.cc"],

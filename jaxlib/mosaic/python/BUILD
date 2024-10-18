@@ -18,6 +18,45 @@ load("@llvm-project//mlir:tblgen.bzl", "gentbl_filegroup")
 load("@rules_python//python:defs.bzl", "py_library")
 
 gentbl_filegroup(
+    name = "mosaic_gpu_python_gen_raw",
+    tbl_outs = [
+        (
+            [
+                "-gen-python-op-bindings",
+                "-bind-dialect=mosaic_gpu",
+            ],
+            "_mosaic_gpu_gen_raw.py",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "//jaxlib/mosaic/dialect/gpu:mosaic_gpu.td",
+    deps = [
+        "//jaxlib/mosaic/dialect/gpu:mosaic_gpu_td_files",
+        "@llvm-project//mlir:OpBaseTdFiles",
+    ],
+)
+
+genrule(
+    name = "mosaic_gpu_python_gen",
+    srcs = ["_mosaic_gpu_gen_raw.py"],
+    outs = ["_mosaic_gpu_gen.py"],
+    cmd = "cat $(location _mosaic_gpu_gen_raw.py) | sed -e 's/^from \\./from jaxlib\\.mlir\\.dialects\\./g' > $@",
+)
+
+py_library(
+    name = "mosaic_gpu_dialect",
+    srcs = [
+        "_mosaic_gpu_gen.py",
+        "mosaic_gpu.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jaxlib/mlir:ir",
+        "//jaxlib/mlir/_mlir_libs:_mosaic_gpu_ext",
+    ],
+)
+
+gentbl_filegroup(
     name = "tpu_python_gen_raw",
     tbl_outs = [
         (

@@ -25,6 +25,9 @@ from .core import (
     Union as Union,
     as_gpu_kernel as as_gpu_kernel,
 )
+from .dialects import (
+    mosaic_gpu_dialect as mosaic_gpu_dialect,
+)
 from .fragmented_array import (
     FragmentedArray as FragmentedArray,
     FragmentedLayout as FragmentedLayout,
@@ -46,8 +49,8 @@ from .utils import (
     ds as ds,
     fori as fori,
     memref_fold as memref_fold,
-    memref_slice as memref_slice,
     memref_reshape as memref_reshape,
+    memref_slice as memref_slice,
     memref_transpose as memref_transpose,
     memref_unfold as memref_unfold,
     memref_unsqueeze as memref_unsqueeze,
