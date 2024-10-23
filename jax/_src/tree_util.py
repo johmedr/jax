@@ -25,6 +25,7 @@ import textwrap
 from typing import Any, NamedTuple, TypeVar, Union, overload
 
 from jax._src import traceback_util
+from jax._src import lib
 from jax._src.lib import pytree
 from jax._src.util import safe_zip, set_module
 from jax._src.util import unzip2
@@ -41,7 +42,10 @@ H = TypeVar("H", bound=Hashable)
 Leaf = Any
 PyTreeDef = pytree.PyTreeDef
 
-default_registry = pytree.default_registry()
+if lib.xla_extension_version >= 294:
+  default_registry = pytree.PyTreeRegistry()
+else:
+  default_registry = pytree.default_registry()  # pytype: disable=module-attr
 # Set __module__ and __name__, which allow this registry to be pickled by
 # reference.
 default_registry.__module__ = __name__
