@@ -32,6 +32,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/strings/str_cat.h"
+#include "mlir/include/mlir/Dialect/Arith/Transforms/Passes.h"
 #include "jaxlib/gpu/vendor.h"
 #include "jaxlib/mosaic/gpu/target.h"
 #include "absl/base/optimization.h"
@@ -141,12 +142,14 @@ mlir::FailureOr<mlir::OpPassManager> GetPassPipeline(
     mosaic::gpu::registerGpuLaunchLoweringPass();
     mosaic::gpu::registerConvertGpuToLLVMPass();
     mosaic::gpu::registerByvalInsertionPass();
+    mlir::arith::registerArithExpandOpsPass();
     return true;
   }();
   (void)register_once;
   return mlir::parsePassPipeline(absl::StrCat(
       R"(
       builtin.module(
+        arith-expand,
         canonicalize,
         gpu-launch-sink-index-computations,
         convert-nvgpu-to-nvvm,
