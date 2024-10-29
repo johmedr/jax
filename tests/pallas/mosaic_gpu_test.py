@@ -240,6 +240,7 @@ class PallasCallTest(PallasTest):
     def kernel(x_ref, o_ref_gmem, scratch_ref):
       scratch_ref[...] = x_ref[...] + 1
       plgpu.copy_smem_to_gmem(scratch_ref.at[indexer], o_ref_gmem.at[indexer])
+      plgpu.commit_smem()
       plgpu.wait_smem_to_gmem(0)
 
     x = jnp.arange(256).astype(jnp.float32)
@@ -295,6 +296,7 @@ class PallasCallTest(PallasTest):
         plgpu.barrier_wait(barrier_ref)
       else:
         plgpu.copy_smem_to_gmem(x_ref, o_ref)
+        plgpu.commit_smem()
         plgpu.wait_smem_to_gmem(0)
 
     in_spec = pl.BlockSpec(memory_space=plgpu.GMEM)
@@ -1049,6 +1051,7 @@ class PipelineTest(PallasTest):
         plgpu.copy_smem_to_gmem(
             o_smem.at[slot], o_gmem.at[gmem_slice, pl.ds(step * 16, 16)]
         )
+        plgpu.commit_smem()
 
         fetch_step = step + max_concurrent_steps
         fetch_slot = slot  # (x + y) % y == x % y

@@ -159,6 +159,7 @@ def emit_pipeline(
 
       # Copy the output from SMEM to GMEM.
       map(lambda bref: bref.copy_out(slot, indices), out_brefs)
+      gpu_primitives.commit_smem()
 
       fetch_step = step + max_concurrent_steps
       fetch_slot = slot  # (x + y) % y == x % y
